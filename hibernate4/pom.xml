@@ -80,6 +80,18 @@ Hibernate (http://hibernate.org) version 4.x data types.
 	  <version>1.3.155</version>
 	  <scope>test</scope>
 	</dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-all</artifactId>
+      <version>1.10.19</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.module</groupId>
+      <artifactId>jackson-module-jaxb-annotations</artifactId>
+      <version>${version.jackson.annotations}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
