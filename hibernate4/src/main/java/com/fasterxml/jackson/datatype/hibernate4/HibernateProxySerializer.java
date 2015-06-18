@@ -1,21 +1,23 @@
 package com.fasterxml.jackson.datatype.hibernate4;
 
 
-import java.io.IOException;
-import java.util.HashMap;
-
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.BeanProperty;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.jsontype.TypeSerializer;
+import com.fasterxml.jackson.databind.ser.BeanPropertyWriter;
+import com.fasterxml.jackson.databind.ser.BeanSerializerBuilder;
+import com.fasterxml.jackson.databind.ser.impl.PropertySerializerMap;
 import org.hibernate.engine.spi.Mapping;
 import org.hibernate.engine.spi.SessionImplementor;
 import org.hibernate.proxy.HibernateProxy;
 import org.hibernate.proxy.LazyInitializer;
 
-import com.fasterxml.jackson.core.*;
-import com.fasterxml.jackson.databind.*;
-import com.fasterxml.jackson.databind.jsontype.TypeSerializer;
-import com.fasterxml.jackson.databind.ser.BeanPropertyWriter;
-import com.fasterxml.jackson.databind.ser.BeanSerializer;
-import com.fasterxml.jackson.databind.ser.BeanSerializerBuilder;
-import com.fasterxml.jackson.databind.ser.impl.PropertySerializerMap;
+import java.io.IOException;
+import java.util.HashMap;
 
 /**
  * Serializer to use for values proxied using {@link HibernateProxy}.
@@ -25,7 +27,7 @@ import com.fasterxml.jackson.databind.ser.impl.PropertySerializerMap;
  * of functionality we need, and has access to more information than value
  * serializers (like this one) have.
  */
-public class HibernateProxySerializer extends BeanSerializer {
+public class HibernateProxySerializer extends ClonedBeanSerializer {
 	/**
 	 * Property that has proxy value to handle
 	 */
@@ -82,25 +84,30 @@ public class HibernateProxySerializer extends BeanSerializer {
 	 */
 
 	// since 2.3
-	public boolean isEmpty(HibernateProxy value) {
-		return (value == null) || (findProxied(value) == null);
+	public boolean isEmpty(Object value) {
+		return (value == null) || (findProxied((HibernateProxy) value) == null);
 	}
 
-	public void serialize(HibernateProxy value, JsonGenerator jgen,
+	public void serialize(Object value, JsonGenerator jgen,
 			SerializerProvider provider) throws IOException,
 			JsonProcessingException {
-		Object proxiedValue = findProxied(value);
+		Object proxiedValue = findProxied((HibernateProxy) value);
 		// TODO: figure out how to suppress nulls, if necessary? (too late for
 		// that here)
 		if (proxiedValue == null) {
 			provider.defaultSerializeNull(jgen);
 			return;
 		}
-		findSerializer(provider, proxiedValue).serialize(proxiedValue, jgen,
-				provider);
+		if(proxiedValue instanceof HibernateProxy){
+			super.serialize(proxiedValue, jgen, provider);
+		} else{
+			findSerializer(provider, proxiedValue).serialize(proxiedValue, jgen,
+					provider);
+		}
+
 	}
 
-	public void serializeWithType(HibernateProxy value, JsonGenerator jgen,
+	public void serializeWithType(Object value, JsonGenerator jgen,
 			SerializerProvider provider, TypeSerializer typeSer)
 			throws IOException, JsonProcessingException {
 		
@@ -109,7 +116,7 @@ public class HibernateProxySerializer extends BeanSerializer {
             return;
         }
 		
-		Object proxiedValue = findProxied(value);
+		Object proxiedValue = findProxied((HibernateProxy) value);
 		if (proxiedValue == null) {
 			provider.defaultSerializeNull(jgen);
 			return;
@@ -120,8 +127,12 @@ public class HibernateProxySerializer extends BeanSerializer {
 		 * (necessary to know how to apply additional type info) or other
 		 * things; so it's not going to work well. But... we'll do out best.
 		 */
-		findSerializer(provider, proxiedValue).serializeWithType(proxiedValue,
-				jgen, provider, typeSer);
+		if(proxiedValue instanceof HibernateProxy){
+			super.serializeWithType(proxiedValue, jgen, provider, typeSer);
+		} else{
+			findSerializer(provider, proxiedValue).serializeWithType(proxiedValue,
+					jgen, provider, typeSer);
+		}
 	}
 
 	/*
