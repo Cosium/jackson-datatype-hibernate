@@ -10,7 +10,9 @@ import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.jsontype.TypeSerializer;
 import com.fasterxml.jackson.databind.ser.BeanPropertyWriter;
 import com.fasterxml.jackson.databind.ser.BeanSerializerBuilder;
+import com.fasterxml.jackson.databind.ser.impl.ObjectIdWriter;
 import com.fasterxml.jackson.databind.ser.impl.PropertySerializerMap;
+import com.fasterxml.jackson.databind.ser.std.BeanSerializerBase;
 import org.hibernate.engine.spi.Mapping;
 import org.hibernate.engine.spi.SessionImplementor;
 import org.hibernate.proxy.HibernateProxy;
@@ -18,6 +20,7 @@ import org.hibernate.proxy.LazyInitializer;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Serializer to use for values proxied using {@link HibernateProxy}.
@@ -28,54 +31,82 @@ import java.util.HashMap;
  * serializers (like this one) have.
  */
 public class HibernateProxySerializer extends ClonedBeanSerializer {
-	/**
-	 * Property that has proxy value to handle
-	 */
-	protected final BeanProperty _property;
+    /**
+     * Property that has proxy value to handle
+     */
+    protected final BeanProperty _property;
 
-	protected final boolean _forceLazyLoading;
-	protected final boolean _serializeIdentifier;
-	protected final Mapping _mapping;
+    protected final boolean _forceLazyLoading;
+    protected final boolean _serializeIdentifier;
+    protected final Mapping _mapping;
 
-	/**
-	 * For efficient serializer lookup, let's use this; most of the time,
-	 * there's just one type and one serializer.
-	 */
-	protected PropertySerializerMap _dynamicSerializers;
+    /**
+     * For efficient serializer lookup, let's use this; most of the time,
+     * there's just one type and one serializer.
+     */
+    protected PropertySerializerMap _dynamicSerializers;
 
 	/*
-	 * /**********************************************************************
+     * /**********************************************************************
 	 * /* Life cycle
 	 * /**********************************************************************
 	 */
 
-	public HibernateProxySerializer(boolean forceLazyLoading) {
-		this(forceLazyLoading, false, null);
-	}
+    protected HibernateProxySerializer(HibernateProxySerializer hibernateProxySerializer, String[] toIgnore) {
+        super(hibernateProxySerializer, toIgnore);
+        _forceLazyLoading = hibernateProxySerializer._forceLazyLoading;
+        _serializeIdentifier = hibernateProxySerializer._serializeIdentifier;
+        _mapping = hibernateProxySerializer._mapping;
+        _dynamicSerializers = PropertySerializerMap.emptyMap();
+        _property = null;
+    }
 
-	public HibernateProxySerializer(boolean forceLazyLoading,
-			boolean serializeIdentifier) {
-		this(forceLazyLoading, serializeIdentifier, null);
-	}
-	
-	public HibernateProxySerializer(boolean forceLazyLoading,
-			boolean serializeIdentifier, Mapping mapping) {
-		this(null, null, null, null, forceLazyLoading, serializeIdentifier, mapping);
-	}
-	
-	
+    protected HibernateProxySerializer(HibernateProxySerializer hibernateProxySerializer, ObjectIdWriter objectIdWriter) {
+        super(hibernateProxySerializer, objectIdWriter);
+        _forceLazyLoading = hibernateProxySerializer._forceLazyLoading;
+        _serializeIdentifier = hibernateProxySerializer._serializeIdentifier;
+        _mapping = hibernateProxySerializer._mapping;
+        _dynamicSerializers = PropertySerializerMap.emptyMap();
+        _property = null;
+    }
 
-	public HibernateProxySerializer(JavaType type, BeanSerializerBuilder builder,
-		    BeanPropertyWriter[] properties, BeanPropertyWriter[] filteredProperties, boolean forceLazyLoading,
-			boolean serializeIdentifier, Mapping mapping) {
-		super(type, builder,
-				properties, filteredProperties);
-		_forceLazyLoading = forceLazyLoading;
-		_serializeIdentifier = serializeIdentifier;
-		_mapping = mapping;
-		_dynamicSerializers = PropertySerializerMap.emptyMap();
-		_property = null;
-	}
+    protected HibernateProxySerializer(HibernateProxySerializer hibernateProxySerializer, ObjectIdWriter objectIdWriter, Object filterId) {
+        super(hibernateProxySerializer, objectIdWriter, filterId);
+        _forceLazyLoading = hibernateProxySerializer._forceLazyLoading;
+        _serializeIdentifier = hibernateProxySerializer._serializeIdentifier;
+        _mapping = hibernateProxySerializer._mapping;
+        _dynamicSerializers = PropertySerializerMap.emptyMap();
+        _property = null;
+    }
+
+    public HibernateProxySerializer(JavaType type, BeanSerializerBuilder builder,
+                                    BeanPropertyWriter[] properties,
+                                    BeanPropertyWriter[] filteredProperties,
+                                    boolean forceLazyLoading,
+                                    boolean serializeIdentifier, Mapping mapping) {
+        super(type, builder,
+                properties, filteredProperties);
+        _forceLazyLoading = forceLazyLoading;
+        _serializeIdentifier = serializeIdentifier;
+        _mapping = mapping;
+        _dynamicSerializers = PropertySerializerMap.emptyMap();
+        _property = null;
+    }
+
+    @Override
+    public BeanSerializerBase withObjectIdWriter(ObjectIdWriter objectIdWriter) {
+        return new HibernateProxySerializer(this, objectIdWriter, _propertyFilterId);
+    }
+
+    @Override
+    protected BeanSerializerBase withFilterId(Object filterId) {
+        return new HibernateProxySerializer(this, _objectIdWriter, filterId);
+    }
+
+    @Override
+    protected BeanSerializerBase withIgnorals(String[] toIgnore) {
+        return new HibernateProxySerializer(this, toIgnore);
+    }
 
 	/*
 	 * /**********************************************************************
@@ -83,57 +114,52 @@ public class HibernateProxySerializer extends ClonedBeanSerializer {
 	 * /**********************************************************************
 	 */
 
-	// since 2.3
-	public boolean isEmpty(Object value) {
-		return (value == null) || (findProxied((HibernateProxy) value) == null);
-	}
+    // since 2.3
+    public boolean isEmpty(Object value) {
+        return (value == null) || (findProxied((HibernateProxy) value) == null);
+    }
 
-	public void serialize(Object value, JsonGenerator jgen,
-			SerializerProvider provider) throws IOException,
-			JsonProcessingException {
-		Object proxiedValue = findProxied((HibernateProxy) value);
-		// TODO: figure out how to suppress nulls, if necessary? (too late for
-		// that here)
-		if (proxiedValue == null) {
-			provider.defaultSerializeNull(jgen);
-			return;
-		}
-		if(proxiedValue instanceof HibernateProxy){
-			super.serialize(proxiedValue, jgen, provider);
-		} else{
-			findSerializer(provider, proxiedValue).serialize(proxiedValue, jgen,
-					provider);
-		}
-
-	}
-
-	public void serializeWithType(Object value, JsonGenerator jgen,
-			SerializerProvider provider, TypeSerializer typeSer)
-			throws IOException, JsonProcessingException {
-		
-		if (_objectIdWriter != null) {
-            _serializeWithObjectId(value, jgen, provider, typeSer);
+    public void serialize(Object value, JsonGenerator jgen,
+                          SerializerProvider provider) throws IOException,
+            JsonProcessingException {
+        Object proxiedValue = findProxied((HibernateProxy) value);
+        // TODO: figure out how to suppress nulls, if necessary? (too late for
+        // that here)
+        if (proxiedValue == null) {
+            provider.defaultSerializeNull(jgen);
             return;
         }
-		
-		Object proxiedValue = findProxied((HibernateProxy) value);
-		if (proxiedValue == null) {
-			provider.defaultSerializeNull(jgen);
-			return;
-		}
+        if(proxiedValue instanceof Map){
+            findSerializer(provider, proxiedValue).serialize(proxiedValue, jgen,
+                    provider);
+        } else{
+            super.serialize(value, jgen, provider);
+        }
+
+
+    }
+
+    public void serializeWithType(Object value, JsonGenerator jgen,
+                                  SerializerProvider provider, TypeSerializer typeSer)
+            throws IOException, JsonProcessingException {
+        Object proxiedValue = findProxied((HibernateProxy) value);
+        if (proxiedValue == null) {
+            provider.defaultSerializeNull(jgen);
+            return;
+        }
 		/*
 		 * This isn't exactly right, since type serializer really refers to
 		 * proxy object, not value. And we really don't either know static type
 		 * (necessary to know how to apply additional type info) or other
 		 * things; so it's not going to work well. But... we'll do out best.
 		 */
-		if(proxiedValue instanceof HibernateProxy){
-			super.serializeWithType(proxiedValue, jgen, provider, typeSer);
-		} else{
-			findSerializer(provider, proxiedValue).serializeWithType(proxiedValue,
-					jgen, provider, typeSer);
-		}
-	}
+        if(proxiedValue instanceof Map) {
+            findSerializer(provider, proxiedValue).serializeWithType(proxiedValue,
+                    jgen, provider, typeSer);
+        } else{
+            super.serializeWithType(value, jgen, provider, typeSer);
+        }
+    }
 
 	/*
 	 * /**********************************************************************
@@ -141,14 +167,14 @@ public class HibernateProxySerializer extends ClonedBeanSerializer {
 	 * /**********************************************************************
 	 */
 
-	protected JsonSerializer<Object> findSerializer(
-			SerializerProvider provider, Object value) throws IOException,
-			JsonProcessingException {
+    protected JsonSerializer<Object> findSerializer(
+            SerializerProvider provider, Object value) throws IOException,
+            JsonProcessingException {
 		/*
 		 * TODO: if Hibernate did use generics, or we wanted to allow use of
 		 * Jackson annotations to indicate type, should take that into account.
 		 */
-		Class<?> type = value.getClass();
+        Class<?> type = value.getClass();
 		/*
 		 * we will use a map to contain serializers found so far, keyed by type:
 		 * this avoids potentially costly lookup from global caches and/or
@@ -159,43 +185,43 @@ public class HibernateProxySerializer extends ClonedBeanSerializer {
 		 * secondary is really anyone's guess at this point; proxies can exist
 		 * at any level?
 		 */
-		PropertySerializerMap.SerializerAndMapResult result = _dynamicSerializers
-				.findAndAddPrimarySerializer(type, provider, _property);
-		if (_dynamicSerializers != result.map) {
-			_dynamicSerializers = result.map;
-		}
-		return result.serializer;
-	}
+        PropertySerializerMap.SerializerAndMapResult result = _dynamicSerializers
+                .findAndAddPrimarySerializer(type, provider, _property);
+        if (_dynamicSerializers != result.map) {
+            _dynamicSerializers = result.map;
+        }
+        return result.serializer;
+    }
 
-	/**
-	 * Helper method for finding value being proxied, if it is available or if
-	 * it is to be forced to be loaded.
-	 */
-	protected Object findProxied(HibernateProxy proxy) {
-		LazyInitializer init = proxy.getHibernateLazyInitializer();
-		if (!_forceLazyLoading && init.isUninitialized()) {
-			if (_serializeIdentifier) {
-				final String idName;
-				if (_mapping != null) {
-					idName = _mapping.getIdentifierPropertyName(init
+    /**
+     * Helper method for finding value being proxied, if it is available or if
+     * it is to be forced to be loaded.
+     */
+    protected Object findProxied(HibernateProxy proxy) {
+        LazyInitializer init = proxy.getHibernateLazyInitializer();
+        if (!_forceLazyLoading && init.isUninitialized()) {
+            if (_serializeIdentifier) {
+                final String idName;
+                if (_mapping != null) {
+                    idName = _mapping.getIdentifierPropertyName(init
 							.getEntityName());
-				} else {
-					final SessionImplementor session = init.getSession();
-					if (session != null) {
-						idName = session
+                } else {
+                    final SessionImplementor session = init.getSession();
+                    if (session != null) {
+                        idName = session
 								.getFactory()
-								.getIdentifierPropertyName(init.getEntityName());
-					} else {
-						idName = init.getEntityName();
-					}
-				}
-				final Object idValue = init.getIdentifier();
-				HashMap<String, Object> map = new HashMap<String, Object>();
-				map.put(idName, idValue);
-				return map;
-			}
-			return null;
-		}
-		return init.getImplementation();
-	}
+                                .getIdentifierPropertyName(init.getEntityName());
+                    } else {
+                        idName = init.getEntityName();
+                    }
+                }
+                final Object idValue = init.getIdentifier();
+                HashMap<String, Object> map = new HashMap<String, Object>();
+                map.put(idName, idValue);
+                return map;
+            }
+            return null;
+        }
+        return init.getImplementation();
+    }
 }
